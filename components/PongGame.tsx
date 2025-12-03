@@ -23,6 +23,9 @@ const COMPUTER_SPEED = 6.5;
 const INITIAL_BALL_SPEED = 7;
 const MAX_BALL_SPEED = 14;
 
+// Distance from the edge of the field (Increased to lift paddles on mobile)
+const PADDLE_OFFSET = 85; 
+
 // --- Types ---
 interface Ball {
   x: number;
@@ -271,8 +274,9 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
       sendSound(SoundType.WALL_HIT);
     }
 
-    const paddleLeft = { x: 20, y: state.paddleLeftY, w: PADDLE_WIDTH, h: PADDLE_HEIGHT };
-    const paddleRight = { x: GAME_WIDTH - 20 - PADDLE_WIDTH, y: state.paddleRightY, w: PADDLE_WIDTH, h: PADDLE_HEIGHT };
+    // Use constant offset for paddle positions
+    const paddleLeft = { x: PADDLE_OFFSET, y: state.paddleLeftY, w: PADDLE_WIDTH, h: PADDLE_HEIGHT };
+    const paddleRight = { x: GAME_WIDTH - PADDLE_OFFSET - PADDLE_WIDTH, y: state.paddleRightY, w: PADDLE_WIDTH, h: PADDLE_HEIGHT };
     const ballRect = { x: state.ball.x, y: state.ball.y, w: BALL_SIZE, h: BALL_SIZE };
 
     if (
@@ -430,10 +434,10 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
     };
 
     // Paddle Left (P1/Host)
-    fillRect(20, state.paddleLeftY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    fillRect(PADDLE_OFFSET, state.paddleLeftY, PADDLE_WIDTH, PADDLE_HEIGHT);
 
     // Paddle Right (P2/Client/AI)
-    fillRect(GAME_WIDTH - 20 - PADDLE_WIDTH, state.paddleRightY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    fillRect(GAME_WIDTH - PADDLE_OFFSET - PADDLE_WIDTH, state.paddleRightY, PADDLE_WIDTH, PADDLE_HEIGHT);
 
     // Ball
     fillRect(state.ball.x, state.ball.y, BALL_SIZE, BALL_SIZE);
