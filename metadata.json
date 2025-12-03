@@ -1,0 +1,5 @@
+{
+  "name": "Retro 8-Bit Pong",
+  "description": "A classic 8-bit Ping Pong game with CRT visual effects and synthesized audio. Player vs Computer.",
+  "requestFramePermissions": []
+}
