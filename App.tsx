@@ -3,26 +3,51 @@ import PongGame from './components/PongGame';
 
 const App: React.FC = () => {
   const [isMobile, setIsMobile] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(true);
 
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
+    const checkLayout = () => {
+      // Check for mobile user agent or small screen dimensions (width or height < 900 to catch landscape phones)
+      const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent) || window.innerWidth < 1024;
+      setIsMobile(isMobileDevice);
+
+      // Check orientation
+      const isLand = window.innerWidth >= window.innerHeight;
+      setIsLandscape(isLand);
     };
     
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    checkLayout();
+    window.addEventListener('resize', checkLayout);
+    window.addEventListener('orientationchange', checkLayout);
+    
+    return () => {
+        window.removeEventListener('resize', checkLayout);
+        window.removeEventListener('orientationchange', checkLayout);
+    };
   }, []);
 
+  // Mobile Portrait: Ask to rotate
+  if (isMobile && !isLandscape) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center text-[#33ff33] z-50 p-4">
+        <div className="text-6xl mb-6 animate-pulse" style={{ transform: 'rotate(90deg)' }}>📱</div>
+        <h1 className="text-xl font-bold font-sans tracking-widest mb-2 text-center">PLEASE ROTATE DEVICE</h1>
+        <p className="text-xs opacity-70 font-sans uppercase tracking-widest text-center">Landscape Mode Required</p>
+      </div>
+    );
+  }
+
+  // Mobile Landscape: Full Screen Game
   if (isMobile) {
     return (
       <div className="relative w-full h-[100dvh] bg-black overflow-hidden flex flex-col">
-        {/* Mobile: No CRT Frame, just the game */}
+        {/* Mobile Landscape: Full Screen Game */}
         <PongGame isMobile={true} />
       </div>
     );
   }
 
+  // Desktop: CRT Frame
   return (
     <div className="relative min-h-screen w-full bg-[#050505] flex items-center justify-center p-4 overflow-hidden">
       
