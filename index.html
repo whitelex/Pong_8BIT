@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Retro Pong 8-Bit</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -15,6 +15,9 @@
         background-color: #050505;
         overflow: hidden;
         font-family: 'Press Start 2P', cursive;
+        touch-action: none; /* Prevent scroll on mobile */
+        user-select: none; /* Prevent text selection */
+        -webkit-user-select: none;
       }
       
       /* Custom CRT Animations and Classes */
