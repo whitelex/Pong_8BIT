@@ -43,7 +43,7 @@ interface GameState {
   scoreRight: number;
   isRunning: boolean;
   isGameOver: boolean;
-  winner: 'PLAYER 1' | 'PLAYER 2' | 'COMPUTER' | null;
+  winner: string | null;
   mode: 'SINGLE' | 'HOST' | 'CLIENT';
 }
 
@@ -68,6 +68,14 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
   const peerRef = useRef<any>(null);
   const connRef = useRef<any>(null);
   
+  // User Settings
+  const [localNickname, setLocalNickname] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+        return localStorage.getItem('pong_nickname') || 'PLAYER 1';
+    }
+    return 'PLAYER 1';
+  });
+
   // Mutable game state
   const gameState = useRef<GameState>({
     ball: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, dx: INITIAL_BALL_SPEED, dy: INITIAL_BALL_SPEED, speed: INITIAL_BALL_SPEED },
@@ -86,20 +94,22 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
     scoreL: number;
     scoreR: number;
     gameStatus: 'MENU' | 'HOST_WAIT' | 'JOIN_INPUT' | 'PLAYING' | 'GAME_OVER';
-    winner: string | null;
+    winnerName: string | null;
     isMuted: boolean;
     hostId: string | null;
     joinId: string;
     connectionStatus: string;
+    remoteNickname: string;
   }>({
     scoreL: 0,
     scoreR: 0,
     gameStatus: 'MENU',
-    winner: null,
+    winnerName: null,
     isMuted: getMuted(),
     hostId: null,
     joinId: '',
     connectionStatus: '',
+    remoteNickname: 'CPU',
   });
 
   const canvasWidth = isMobile ? MOBILE_WIDTH : DESKTOP_WIDTH;
@@ -109,6 +119,12 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
     const muted = toggleMute();
     setUiState(prev => ({ ...prev, isMuted: muted }));
     if (!muted) playSound(SoundType.PADDLE_HIT);
+  };
+
+  const updateNickname = (name: string) => {
+    const cleaned = name.toUpperCase().slice(0, 10); // Limit length
+    setLocalNickname(cleaned);
+    localStorage.setItem('pong_nickname', cleaned);
   };
 
   // --- Network Logic ---
@@ -122,7 +138,7 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
   };
 
   const startHost = () => {
-    setUiState(prev => ({ ...prev, gameStatus: 'HOST_WAIT', hostId: 'Generating...', connectionStatus: 'Creating Room...' }));
+    setUiState(prev => ({ ...prev, gameStatus: 'HOST_WAIT', hostId: 'Generating...', connectionStatus: 'Creating Room...', remoteNickname: 'WAITING...' }));
     
     const peer = initPeer();
 
@@ -132,15 +148,21 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
 
     peer.on('connection', (conn: any) => {
       connRef.current = conn;
-      setUiState(prev => ({ ...prev, connectionStatus: 'Connected! Starting...', gameStatus: 'PLAYING' }));
+      setUiState(prev => ({ ...prev, connectionStatus: 'Connected! Handshaking...' }));
       
+      conn.on('open', () => {
+        // Send our nickname to the client
+        conn.send({ type: 'NICKNAME', name: localNickname });
+      });
+
       conn.on('data', (data: any) => {
         if (data.type === 'INPUT') {
           gameState.current.paddleRightY = data.y;
+        } else if (data.type === 'NICKNAME') {
+          setUiState(prev => ({ ...prev, remoteNickname: data.name, gameStatus: 'PLAYING' }));
+          startGame('HOST');
         }
       });
-      
-      startGame('HOST');
     });
   };
 
@@ -155,8 +177,9 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
       connRef.current = conn;
 
       conn.on('open', () => {
-        setUiState(prev => ({ ...prev, connectionStatus: 'Connected!', gameStatus: 'PLAYING' }));
-        startGame('CLIENT');
+        setUiState(prev => ({ ...prev, connectionStatus: 'Connected! Handshaking...' }));
+        // Send our nickname to host
+        conn.send({ type: 'NICKNAME', name: localNickname });
       });
 
       conn.on('data', (data: any) => {
@@ -165,7 +188,10 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
         } else if (data.type === 'SOUND') {
           playSound(data.sound);
         } else if (data.type === 'OVER') {
-           endGame(data.winner);
+           endGame(data.winner); // Winner name is passed directly
+        } else if (data.type === 'NICKNAME') {
+           setUiState(prev => ({ ...prev, remoteNickname: data.name, gameStatus: 'PLAYING' }));
+           startGame('CLIENT');
         }
       });
     });
@@ -338,25 +364,29 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
     }));
 
     if (state.scoreLeft >= WINNING_SCORE) {
-      endGame('PLAYER 1');
+      // Left (Player 1) Won
+      const winnerName = state.mode === 'CLIENT' ? uiState.remoteNickname : localNickname;
+      endGame(winnerName);
     } else if (state.scoreRight >= WINNING_SCORE) {
-      endGame(state.mode === 'SINGLE' ? 'COMPUTER' : 'PLAYER 2');
+      // Right (Player 2) Won
+      const winnerName = state.mode === 'CLIENT' ? localNickname : uiState.remoteNickname;
+      endGame(winnerName);
     }
   };
 
-  const endGame = (winner: string) => {
+  const endGame = (winnerName: string) => {
     gameState.current.isRunning = false;
     gameState.current.isGameOver = true;
-    gameState.current.winner = winner as any;
+    gameState.current.winner = winnerName;
     
     setUiState(prev => ({
       ...prev,
       gameStatus: 'GAME_OVER',
-      winner: winner
+      winnerName: winnerName
     }));
     
     if (gameState.current.mode === 'HOST' && connRef.current) {
-        connRef.current.send({ type: 'OVER', winner });
+        connRef.current.send({ type: 'OVER', winner: winnerName });
     }
 
     playSound(SoundType.GAME_OVER);
@@ -376,10 +406,6 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
     
     if (state.mode === 'CLIENT') {
         // CLIENT PERSPECTIVE (P2): 
-        // Logic: P2 is at x=780. We want that at y=800.
-        // Game X(800) -> Screen Y(800). Game Y(0) -> Screen X(600).
-        // Rotate 90deg CW + shifts.
-        // Formula: NewX = GameHeight - GameY, NewY = GameX.
         return {
             x: GAME_HEIGHT - y - h, // Invert Y for X axis
             y: x,
@@ -388,9 +414,6 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
         };
     } else {
         // HOST/SINGLE PERSPECTIVE (P1):
-        // Logic: P1 is at x=20. We want that at y=800.
-        // Game X(0) -> Screen Y(800).
-        // Formula: NewX = GameY, NewY = GameWidth - GameX.
         return {
             x: y,
             y: GAME_WIDTH - x - w, // Invert X for Y axis
@@ -467,20 +490,13 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
     
     if (isMobile) {
         // Mobile Input Logic
-        // We map Screen X (0-Width) to Game Y (0-Height).
-        // Since Game Y maps to Screen X directly in P1 view (and inverted in P2 view).
-        
         const relativeX = clientX - rect.left;
-        const scaleX = GAME_HEIGHT / rect.width; // Game Height is mapped to Screen Width
-        
+        const scaleX = GAME_HEIGHT / rect.width; 
         let gameY = 0;
 
         if (state.mode === 'CLIENT') {
-             // Screen X (0) = Game Y (600). Screen X (600) = Game Y (0).
-             // Inverted X input.
              gameY = GAME_HEIGHT - (relativeX * scaleX);
         } else {
-             // Screen X (0) = Game Y (0).
              gameY = relativeX * scaleX;
         }
 
@@ -509,7 +525,6 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => handleInput(e.clientX, e.clientY);
     const handleTouchMove = (e: TouchEvent) => {
-        // e.preventDefault(); // Handled by CSS touch-action: none
         handleInput(e.touches[0].clientX, e.touches[0].clientY);
     };
     const handleTouchStart = (e: TouchEvent) => {
@@ -517,7 +532,6 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
     };
 
     window.addEventListener('mousemove', handleMouseMove);
-    // Add non-passive listener to prevent scroll if CSS fails
     const canvas = canvasRef.current;
     if (canvas) {
         canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
@@ -551,6 +565,10 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
       mode: mode,
     };
     
+    if (mode === 'SINGLE') {
+        setUiState(p => ({ ...p, remoteNickname: 'CPU' }));
+    }
+    
     if (mode !== 'CLIENT') {
         if (Math.random() > 0.5) gameState.current.ball.dx = -INITIAL_BALL_SPEED;
         sendSound(SoundType.GAME_START);
@@ -561,9 +579,48 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
       scoreL: 0,
       scoreR: 0,
       gameStatus: 'PLAYING',
-      winner: null
+      winnerName: null
     }));
   };
+  
+  // Scoreboard Derived Data
+  const getScoreboardData = () => {
+    const { mode } = gameState.current;
+    // On mobile, Bottom is Local Player (Me). Top is Remote/Enemy.
+    if (isMobile) {
+        // If I am CLIENT: Me=Right(Bottom), Enemy=Left(Top)
+        // If I am HOST/SINGLE: Me=Left(Bottom), Enemy=Right(Top)
+        
+        const topName = uiState.remoteNickname;
+        const topScore = mode === 'CLIENT' ? uiState.scoreL : uiState.scoreR;
+        
+        const bottomName = localNickname;
+        const bottomScore = mode === 'CLIENT' ? uiState.scoreR : uiState.scoreL;
+        
+        return {
+            name1: topName, score1: topScore,
+            name2: bottomName, score2: bottomScore,
+            isRotated: true
+        };
+    } else {
+        // Desktop: Left=P1, Right=P2
+        // Left is Host/P1. Right is Client/P2/CPU.
+        
+        const leftName = mode === 'CLIENT' ? uiState.remoteNickname : localNickname;
+        const leftScore = uiState.scoreL;
+        
+        const rightName = mode === 'CLIENT' ? localNickname : uiState.remoteNickname;
+        const rightScore = uiState.scoreR;
+        
+        return {
+            name1: leftName, score1: leftScore,
+            name2: rightName, score2: rightScore,
+            isRotated: false
+        };
+    }
+  };
+  
+  const scoreData = getScoreboardData();
 
   return (
     <div ref={containerRef} className="relative w-full h-full cursor-none bg-black">
@@ -574,14 +631,26 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
         className="w-full h-full block object-fill"
         style={{ imageRendering: 'pixelated' }}
       />
-
-      <div className={`absolute pointer-events-none flex ${isMobile ? 'flex-col justify-center gap-64 items-center right-4 top-1/2 -translate-y-1/2' : 'top-8 left-0 w-full justify-between px-16 sm:px-32'}`}>
-         {/* Rotate text for mobile players to face them? No, keep it upright for readability */}
-         <div className={`text-[#33ff33] font-bold ${isMobile ? 'text-4xl' : 'text-4xl sm:text-6xl'}`}>
-             {isMobile ? (gameState.current.mode === 'CLIENT' ? uiState.scoreR : uiState.scoreL) : uiState.scoreL}
+      
+      {/* Scoreboard */}
+      <div className={`absolute pointer-events-none flex ${isMobile ? 'flex-col justify-center gap-64 items-center right-4 top-1/2 -translate-y-1/2' : 'top-8 left-0 w-full justify-between px-16 sm:px-32 items-start'}`}>
+         
+         {/* Player 1 (Left on Desktop, Top on Mobile) */}
+         <div className="flex flex-col items-center gap-2">
+            {!isMobile && <div className="text-[#33ff33] text-sm tracking-widest font-bold">{scoreData.name1}</div>}
+            <div className={`text-[#33ff33] font-bold ${isMobile ? 'text-4xl' : 'text-4xl sm:text-6xl'}`}>
+                {scoreData.score1}
+            </div>
+            {isMobile && <div className="text-[#33ff33] text-xs tracking-widest font-bold opacity-75">{scoreData.name1}</div>}
          </div>
-         <div className={`text-[#33ff33] font-bold ${isMobile ? 'text-4xl' : 'text-4xl sm:text-6xl'}`}>
-             {isMobile ? (gameState.current.mode === 'CLIENT' ? uiState.scoreL : uiState.scoreR) : uiState.scoreR}
+
+         {/* Player 2 (Right on Desktop, Bottom on Mobile) */}
+         <div className="flex flex-col items-center gap-2">
+            {!isMobile && <div className="text-[#33ff33] text-sm tracking-widest font-bold">{scoreData.name2}</div>}
+            <div className={`text-[#33ff33] font-bold ${isMobile ? 'text-4xl' : 'text-4xl sm:text-6xl'}`}>
+                {scoreData.score2}
+            </div>
+             {isMobile && <div className="text-[#33ff33] text-xs tracking-widest font-bold opacity-75">{scoreData.name2}</div>}
          </div>
       </div>
 
@@ -598,25 +667,39 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
 
       {uiState.gameStatus === 'MENU' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-20">
-          <h1 className="text-[#33ff33] text-4xl sm:text-6xl mb-8 text-center text-shadow-glow tracking-tighter">
+          <h1 className="text-[#33ff33] text-4xl sm:text-6xl mb-6 text-center text-shadow-glow tracking-tighter">
             PONG_8BIT
           </h1>
-          <div className="flex flex-col gap-4 w-64 pointer-events-auto">
+          
+          <div className="flex flex-col gap-4 w-72 pointer-events-auto items-center">
+            
+            <div className="w-full flex flex-col gap-1 mb-2">
+                <label className="text-[#33ff33] text-xs">NICKNAME</label>
+                <input 
+                    type="text"
+                    maxLength={10}
+                    value={localNickname}
+                    onChange={(e) => updateNickname(e.target.value)}
+                    className="w-full bg-black border-2 border-[#33ff33] text-[#33ff33] p-2 text-center uppercase outline-none focus:bg-[#33ff33]/10"
+                    placeholder="PLAYER"
+                />
+            </div>
+
             <button
                 onClick={() => startGame('SINGLE')}
-                className="px-6 py-3 border-4 border-[#33ff33] text-[#33ff33] font-bold hover:bg-[#33ff33] hover:text-black transition-colors uppercase cursor-pointer"
+                className="w-full px-6 py-3 border-4 border-[#33ff33] text-[#33ff33] font-bold hover:bg-[#33ff33] hover:text-black transition-colors uppercase cursor-pointer"
             >
                 1 PLAYER
             </button>
             <button
                 onClick={startHost}
-                className="px-6 py-3 border-4 border-[#33ff33] text-[#33ff33] font-bold hover:bg-[#33ff33] hover:text-black transition-colors uppercase cursor-pointer"
+                className="w-full px-6 py-3 border-4 border-[#33ff33] text-[#33ff33] font-bold hover:bg-[#33ff33] hover:text-black transition-colors uppercase cursor-pointer"
             >
                 CREATE MATCH
             </button>
              <button
                 onClick={() => setUiState(p => ({ ...p, gameStatus: 'JOIN_INPUT' }))}
-                className="px-6 py-3 border-4 border-[#33ff33] text-[#33ff33] font-bold hover:bg-[#33ff33] hover:text-black transition-colors uppercase cursor-pointer"
+                className="w-full px-6 py-3 border-4 border-[#33ff33] text-[#33ff33] font-bold hover:bg-[#33ff33] hover:text-black transition-colors uppercase cursor-pointer"
             >
                 JOIN MATCH
             </button>
@@ -676,8 +759,9 @@ const PongGame: React.FC<PongGameProps> = ({ isMobile }) => {
           <h2 className="text-[#33ff33] text-3xl sm:text-5xl mb-4 text-center">
             GAME OVER
           </h2>
-          <div className="text-white text-xl mb-8">
-            WINNER: <span className="text-[#33ff33]">{uiState.winner}</span>
+          <div className="text-white text-xl mb-8 flex flex-col items-center gap-2">
+            WINNER
+            <span className="text-[#33ff33] text-3xl font-bold">{uiState.winnerName}</span>
           </div>
           <button
             onClick={() => {
